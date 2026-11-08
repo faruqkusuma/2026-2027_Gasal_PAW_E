@@ -1,0 +1,210 @@
+<?php
+require 'koneksi.php';
+$transaksi_id = 1;
+
+if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+    
+    if (isset($_POST['simpan_detail'])) {
+        $barang_id = (int)$_POST['barang_id'];
+        $qty = (int)$_POST['qty'];
+
+        if ($barang_id > 0 && $qty > 0) {
+            $res_harga = $conn->query("SELECT harga FROM barang WHERE id = $barang_id");
+            if ($res_harga && $res_harga->num_rows > 0) {
+                $row_harga = $res_harga->fetch_assoc();
+                $harga_barang = $row_harga['harga'];
+
+                $conn->query("INSERT INTO transaksi_detail (transaksi_id, barang_id, harga, qty) 
+                              VALUES ($transaksi_id, $barang_id, $harga_barang, $qty)");
+
+                $conn->query("UPDATE transaksi SET total = (
+                                SELECT COALESCE(SUM(harga * qty), 0) 
+                                FROM transaksi_detail 
+                                WHERE transaksi_id = $transaksi_id
+                              ) WHERE id = $transaksi_id");
+                
+                $notifikasi = "Detail transaksi berhasil ditambahkan dan Total Transaksi diperbarui.";
+            }
+        }
+    }
+    
+    if (isset($_POST['hapus_detail'])) {
+        $barang_id = (int)$_POST['barang_id'];
+        $conn->query("DELETE FROM transaksi_detail WHERE transaksi_id = $transaksi_id AND barang_id = $barang_id");
+        
+        $conn->query("UPDATE transaksi SET total = (
+                        SELECT COALESCE(SUM(harga * qty), 0) 
+                        FROM transaksi_detail 
+                        WHERE transaksi_id = $transaksi_id
+                      ) WHERE id = $transaksi_id");
+    }
+
+    if (isset($_POST['hapus_barang'])) {
+        $barang_id = (int)$_POST['barang_id'];
+        
+        $cek_pakai = $conn->query("SELECT * FROM transaksi_detail WHERE barang_id = $barang_id");
+        
+        if ($cek_pakai && $cek_pakai->num_rows > 0) {
+            $notifikasi = "Peringatan: Data tidak boleh dihapus karena barang tersebut masih digunakan pada transaksi!";
+        } else {
+            $conn->query("DELETE FROM barang WHERE id = $barang_id");
+            $notifikasi = "Data barang berhasil dihapus.";
+        }
+    }
+}
+
+$total_transaksi = 0;
+$waktu_transaksi = "";
+$res_trx = $conn->query("SELECT waktu_transaksi, total FROM transaksi WHERE id = $transaksi_id");
+if ($res_trx && $res_trx->num_rows > 0) {
+    $row_trx = $res_trx->fetch_assoc();
+    $total_transaksi = $row_trx['total'];
+    $waktu_transaksi = $row_trx['waktu_transaksi'];
+}
+
+$barang_terpilih = [];
+$res_detail_terpilih = $conn->query("SELECT barang_id FROM transaksi_detail WHERE transaksi_id = $transaksi_id");
+if ($res_detail_terpilih) {
+    while ($row_dt = $res_detail_terpilih->fetch_assoc()) {
+        $barang_terpilih[] = $row_dt['barang_id'];
+    }
+}
+?>
+
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Master-Detail Transaksi Database</title>
+</head>
+<body>
+    <h3>Data Master Barang</h3>
+    <table border="1">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Nama Barang</th>
+                <th>Harga</th>
+                <th>Aksi</th>
+            </tr>
+        </thead>
+        <tbody>
+            <?php
+            $res_barang = $conn->query("SELECT id, nama_barang, harga FROM barang");
+            if ($res_barang) {
+                while ($barang = $res_barang->fetch_assoc()) {
+            ?>
+            <tr>
+                <td><?= $barang['id'] ?></td>
+                <td><?= $barang['nama_barang'] ?></td>
+                <td><?= $barang['harga'] ?></td>
+                <td>
+                    <form method="POST" style="display:inline;">
+                        <input type="hidden" name="barang_id" value="<?= $barang['id'] ?>">
+                        <button type="submit" name="hapus_barang">Hapus</button>
+                    </form>
+                </td>
+            </tr>
+            <?php 
+                } 
+            }
+            ?>
+        </tbody>
+    </table>
+    <hr>
+
+    <h3>Data Transaksi (Master)</h3>
+    <div>
+        <label>ID Transaksi:</label>
+        <input type="text" value="<?= $transaksi_id ?>" readonly>
+    </div>
+    <br>
+    <div>
+        <label>Tanggal Transaksi:</label>
+        <input type="date" value="<?= $waktu_transaksi ?>" readonly>
+    </div>
+    <br>
+    <div>
+        <label>Total Keseluruhan:</label>
+        <!-- Kolom total ini otomatis berisi dari tabel transaksi berkat query UPDATE di atas -->
+        <input type="number" value="<?= $total_transaksi ?>" readonly>
+    </div>
+    <hr>
+    <h3>Input Detail Transaksi</h3>
+    <form method="POST">
+        <label>Pilih Barang:</label>
+        <select name="barang_id" required>
+            <option value="" disabled selected>-- Pilih Barang --</option>
+            <?php 
+            $res_opt = $conn->query("SELECT id, nama_barang, harga FROM barang");
+            if ($res_opt) {
+                while ($opt = $res_opt->fetch_assoc()) {
+                    
+                    $sudah_dipilih = in_array($opt['id'], $barang_terpilih);
+                    
+                    $disabled_attr = $sudah_dipilih ? 'disabled' : '';
+                    $teks_tambahan = $sudah_dipilih ? ' (Sudah Dipilih)' : '';
+            ?>
+                <option value="<?= $opt['id'] ?>" <?= $disabled_attr ?>>
+                    <?= $opt['nama_barang'] ?> - Rp <?= $opt['harga'] ?> <?= $teks_tambahan ?>
+                </option>
+            <?php 
+                } 
+            }
+            ?>
+        </select>
+        
+        <label>Qty:</label>
+        <input type="number" name="qty" min="1" value="1" required>
+        
+        <button type="submit" name="simpan_detail">Tambah ke Transaksi</button>
+    </form>
+    <br>
+    <h3>Tabel transaksi_detail</h3>
+    <table border="1">
+        <thead>
+            <tr>
+                <th>Barang ID</th>
+                <th>Nama Barang</th>
+                <th>Harga</th>
+                <th>Qty</th>
+                <th>Subtotal</th>
+                <th>Aksi</th>
+            </tr>
+        </thead>
+        <tbody>
+            <?php 
+            $sql_detail = "SELECT td.barang_id, b.nama_barang, td.harga, td.qty 
+                           FROM transaksi_detail td 
+                           JOIN barang b ON td.barang_id = b.id 
+                           WHERE td.transaksi_id = $transaksi_id";
+            $res_dt_table = $conn->query($sql_detail);
+            
+            if ($res_dt_table && $res_dt_table->num_rows > 0) {
+                while ($dt = $res_dt_table->fetch_assoc()) {
+                    $subtotal = $dt['harga'] * $dt['qty'];
+            ?>
+            <tr>
+                <td><?= $dt['barang_id'] ?></td>
+                <td><?= $dt['nama_barang'] ?></td>
+                <td><?= $dt['harga'] ?></td>
+                <td><?= $dt['qty'] ?></td>
+                <td><?= $subtotal ?></td>
+                <td>
+                    <form method="POST" style="display:inline;">
+                        <input type="hidden" name="barang_id" value="<?= $dt['barang_id'] ?>">
+                        <button type="submit" name="hapus_detail">Hapus Detail</button>
+                    </form>
+                </td>
+            </tr>
+            <?php 
+                } 
+            } else {
+                echo "<tr><td colspan='6' align='center'>Belum ada detail barang.</td></tr>";
+            }
+            ?>
+        </tbody>
+    </table>
+
+</body>
+</html>
